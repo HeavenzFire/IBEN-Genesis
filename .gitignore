@@ -1,0 +1,1 @@
+Nothing needs to be added to .gitignore since the changes only include source files (.py) and an image file (.png), which should not be ignored.
