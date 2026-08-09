@@ -1,38 +1,9 @@
 ```
-# Environment and temporary files
+# Environment and config
 .env
 .env.local
-.env.*
+*.env.*
+
+# Keys and sensitive files
 .sovereign_key
-
-# Logs and temporary files
-*.log
-*.tmp
-*.swp
-
-# Editors
-.vscode/
-.idea/
-
-# Python specific
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-
-# Build and distribution artifacts
-dist/
-build/
-*.egg-info/
-
-# Coverage reports
-.coverage
-htmlcov/
-coverage/
-
-# Local configuration
-.DS_Store
-Thumbs.db
 ```
