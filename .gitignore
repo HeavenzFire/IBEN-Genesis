@@ -9,6 +9,11 @@ __pycache__/
 *.exe
 
 # Dependencies
+# Compiled Python files
+*.pyc
+__pycache__/
+
+# Virtual environments
 venv/
 .venv/
 .env
@@ -26,6 +31,7 @@ target/
 *.swp
 
 # Editors and IDEs
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
@@ -49,4 +55,22 @@ __pycache__/
 *.so
 .pytest_cache/
 .mypy_cache/
+*.tmp
+
+# Logs
+*.log
+
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# Python cache
+.mypy_cache/
+.pytest_cache/
+
+# Distribution artifacts
+dist/
+build/
+*.egg-info/
 ```
