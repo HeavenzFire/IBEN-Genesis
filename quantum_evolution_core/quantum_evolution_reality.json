@@ -1,0 +1,24 @@
+{
+  "summary": {
+    "epoch_state": "ACCELERATED_TRANSITION",
+    "initial_state": "gaussian",
+    "trajectory_length": 31,
+    "final_probability": 0.9999999999999997,
+    "final_energy": 0.2595038584991778,
+    "manifold_resolution": 30
+  },
+  "history_samples": {
+    "probability": [
+      1.0,
+      1.0,
+      1.0,
+      0.9999999999999997
+    ],
+    "energy": [
+      0.25883152752116934,
+      0.25890766943998456,
+      0.2590682823888821,
+      0.2595038584991778
+    ]
+  }
+}
