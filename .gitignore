@@ -1,17 +1,16 @@
-```gitignore
-# Configuration and data files
-*.json
-*.config
-*.cfg
-*.ini
-
-# Logs
-*.log
-
-# Environment variables
+```
+# Environment
 .env
 .env.local
-*.env.*
+.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Editors
+.vscode/
+.idea/
 
 # Python
 __pycache__/
@@ -19,48 +18,34 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
-env/
-venv/
-.venv/
-.ENV
-.python-version
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-.git/modules/
-*.sublime-project
-*.sublime-workspace
-.pytest_cache/
-.mypy_cache/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-
-# Build and distribution
-dist/
-build/
+*.so
 *.egg-info/
 .eggs/
-develop-eggs/
-.installed.cfg
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.tox/
+
+# Build directories
+build/
+dist/
 *.egg
+
+# Dependencies
+.venv/
+venv/
+.env/
+pip-log.txt
+pipenv.lock
+requirements.txt.bak
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 ```
