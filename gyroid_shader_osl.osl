@@ -1,0 +1,224 @@
+/*
+ * AERO-SOVEREIGN GYROID OSL SHADER
+ * ==================================
+ * Procedural Triply Periodic Minimal Surface (TPMS) shader for Blender Cycles,
+ * Houdini, and other OSL-compatible renderers.
+ *
+ * Equation: sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x) = 0
+ * Threshold control enables dynamic porosity and fabric thickness.
+ *
+ * Usage:
+ *   1. Enable OSL in renderer settings
+ *   2. Create Script node → Load this file
+ *   3. Connect to material output
+ *   4. Adjust parameters for desired lattice density
+ */
+
+
+#include "stdosl.h"
+
+
+// =============================================================================
+// SHADER PARAMETERS
+// =============================================================================
+
+shader Gyroid_Procedural(
+    // Scale controls the frequency of the gyroid pattern
+    float Scale = 3.0,
+    
+    // Threshold defines the surface cutoff (controls porosity)
+    // Lower values = finer lattice, Higher = thicker struts
+    float Threshold = 0.5,
+    
+    // Thickness gradient for stress-adaptive porosity
+    float Thickness_Gradient = 0.1,
+    
+    // Color inputs
+    color Base_Color = color(0.05, 0.15, 0.35),  // Cobalt blue
+    color Secondary_Color = color(0.85, 0.85, 0.90),  // Platinum overlay
+    color Porous_Color = color(0.02, 0.08, 0.20),  // Deep cobalt
+    
+    // Material properties
+    float Roughness = 0.35,
+    float Metallic = 0.1,
+    float Subsurface = 0.15,
+    float Clearcoat = 0.8,
+    
+    // Animation/variation seed
+    float Offset_X = 0.0,
+    float Offset_Y = 0.0,
+    float Offset_Z = 0.0,
+    
+    // Output mode: 0=solid, 1=wireframe, 2=porosity map
+    int Output_Mode = 0,
+    
+    // Standard closures
+    output closure color BSDF = 0,
+    output float Porosity = 0.0,
+    output float Gyroid_Value = 0.0
+)
+{
+    // =========================================================================
+    // GYROID EQUATION EVALUATION
+    // =========================================================================
+    
+    // Get transformed position
+    vector P_transformed = P * Scale + vector(Offset_X, Offset_Y, Offset_Z);
+    
+    float x = P_transformed[0];
+    float y = P_transformed[1];
+    float z = P_transformed[2];
+    
+    // Evaluate gyroid implicit function
+    // f(x,y,z) = sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x)
+    float gyroid_f = sin(x) * cos(y) + sin(y) * cos(z) + sin(z) * cos(x);
+    
+    // Store raw value for debugging/output
+    Gyroid_Value = gyroid_f;
+    
+    // Calculate distance from surface (absolute value)
+    float distance_from_surface = abs(gyroid_f);
+    
+    // =========================================================================
+    // POROSITY CALCULATION
+    // =========================================================================
+    
+    // Smooth step for anti-aliased thresholding
+    float edge_width = Thickness_Gradient / Scale;
+    float surface_mask = smoothstep(Threshold - edge_width, Threshold + edge_width, distance_from_surface);
+    
+    // Porosity: 1.0 = fully porous, 0.0 = solid
+    Porosity = 1.0 - surface_mask;
+    
+    // =========================================================================
+    // COLOR INTERPOLATION
+    // =========================================================================
+    
+    // Interpolate between base and secondary colors based on gyroid value
+    color final_color;
+    
+    if (Output_Mode == 0) {
+        // Solid mode: blend based on surface proximity
+        float t = smoothstep(0.0, Threshold * 2.0, distance_from_surface);
+        final_color = mix(Base_Color, Secondary_Color, t);
+        
+        // Add subtle variation for fabric-like appearance
+        float noise_val = noise(P_transformed * 10.0);
+        final_color *= mix(color(0.95), color(1.05), noise_val);
+        
+    } else if (Output_Mode == 1) {
+        // Wireframe mode: highlight edges
+        float edge_detect = 1.0 - smoothstep(0.0, edge_width * 2.0, distance_from_surface);
+        final_color = mix(Base_Color, Secondary_Color, edge_detect);
+        
+    } else {
+        // Porosity map mode: visualize porosity gradient
+        final_color = mix(Porous_Color, Base_Color, Porosity);
+    }
+    
+    // =========================================================================
+    // MATERIAL CLOSURE CONSTRUCTION
+    // =========================================================================
+    
+    if (Output_Mode != 2) {
+        // Build principled BSDF-like material
+        
+        // Diffuse component
+        closure color diffuse_closure = diffuse() * final_color * (1.0 - Metallic);
+        
+        // Glossy component
+        closure color glossy_closure = glossy(roughness(Roughness)) * 
+                                       final_color * Metallic * 0.5;
+        
+        // Clearcoat layer
+        closure color clearcoat_closure = clearcoat(Clearcoat, 0.2);
+        
+        // Subsurface scattering (for elastomer/fabric appearance)
+        closure color subsurface_closure = subsurface(
+            Subsurface * final_color, 
+            vector(1.0, 0.5, 0.3)  // Subsurface radius
+        );
+        
+        // Combine all closures
+        BSDF = diffuse_closure + glossy_closure + clearcoat_closure + subsurface_closure;
+    }
+}
+
+
+// =============================================================================
+// ALTERNATIVE: STRESS-ADAPTIVE VARIATION
+// =============================================================================
+
+/*
+ * This variant includes stress-based porosity adaptation for garment simulation.
+ * Uncomment and use when simulating tension-responsive fabrics.
+ */
+
+/*
+shader Gyroid_Stress_Adaptive(
+    float Scale = 3.0,
+    float Base_Threshold = 0.5,
+    vector Stress_Vector = vector(0, 0, 1),  // Direction of primary stress
+    float Stress_Sensitivity = 0.3,
+    
+    color Base_Color = color(0.05, 0.15, 0.35),
+    color Stressed_Color = color(0.15, 0.25, 0.45),  // Lighter under stress
+    
+    output closure color BSDF = 0,
+    output float Stress_Level = 0.0
+)
+{
+    vector P_scaled = P * Scale;
+    
+    // Calculate stress factor based on position along stress vector
+    float stress_factor = abs(dot(normalize(P_scaled), normalize(Stress_Vector)));
+    Stress_Level = stress_factor;
+    
+    // Adapt threshold based on stress (more porous where stressed)
+    float adaptive_threshold = Base_Threshold * (1.0 + stress_factor * Stress_Sensitivity);
+    
+    // Evaluate gyroid
+    float gyroid_f = sin(P_scaled[0]) * cos(P_scaled[1]) + 
+                     sin(P_scaled[1]) * cos(P_scaled[2]) + 
+                     sin(P_scaled[2]) * cos(P_scaled[0]);
+    
+    float distance = abs(gyroid_f);
+    
+    // Color shifts under stress
+    color final_color = mix(Base_Color, Stressed_Color, stress_factor);
+    
+    BSDF = diffuse() * final_color + 
+           glossy(roughness(0.35)) * final_color * 0.1;
+}
+*/
+
+
+// =============================================================================
+// USAGE EXAMPLES (Comments for reference)
+// =============================================================================
+
+/*
+ * MICRO-LATTICE SWIMWEAR SETUP:
+ * -----------------------------
+ * Scale: 5.0
+ * Threshold: 0.4
+ * Thickness_Gradient: 0.05
+ * Base_Color: (0.02, 0.12, 0.40)
+ * Output_Mode: 0
+ *
+ * TENSOR MONOKINI SETUP:
+ * ----------------------
+ * Scale: 4.0
+ * Threshold: 0.55
+ * Thickness_Gradient: 0.15
+ * Base_Color: (0.05, 0.15, 0.35)  // Cobalt nylon
+ * Secondary_Color: (0.85, 0.85, 0.90)  // Platinum overlay
+ * Output_Mode: 0
+ *
+ * MACRO CLOSE-UP (Material R&D):
+ * ------------------------------
+ * Scale: 10.0
+ * Threshold: 0.3
+ * Thickness_Gradient: 0.02
+ * Output_Mode: 2  // Porosity visualization
+ */
