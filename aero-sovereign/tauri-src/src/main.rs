@@ -24,6 +24,7 @@ use std::fs::OpenOptions;
 
 // Substrate 02: Deterministic Sandboxed WASM Engine
 use wasmtime::*;
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
 
 // Substrate 03: P2P Mesh imports (available for async integration)
 // Note: Full libp2p swarm setup requires async context in production
@@ -94,9 +95,9 @@ pub struct SovereignCore {
     memory_map: Mutex<Option<MmapMut>>,
     memory_map_path: PathBuf,
     
-    // Substrate 02: WASM Execution Engine
+    // Substrate 02: WASM Execution Engine with WASI support
     wasm_engine: Mutex<Option<Engine>>,
-    wasm_store: Mutex<Option<Store<()>>>,
+    wasm_store: Mutex<Option<Store<WasiCtx>>>,
     
     // Substrate 03: P2P Mesh Network (async runtime handles this)
     p2p_enabled: Mutex<bool>,
@@ -195,10 +196,17 @@ impl SovereignCore {
         Ok(mmap[..read_len].to_vec())
     }
 
-    /// Substrate 02: Initialize WASM Execution Engine
+    /// Substrate 02: Initialize WASM Execution Engine with WASI context
     pub fn initialize_wasm_engine(&self) -> Result<(), String> {
         let engine = Engine::default();
-        let store = Store::new(&engine, ());
+        
+        // Build WASI context with controlled capabilities
+        let wasi_ctx = WasiCtxBuilder::new()
+            .inherit_stdio()
+            .inherit_args()
+            .build();
+        
+        let store = Store::new(&engine, wasi_ctx);
         
         *self.wasm_engine.lock().unwrap() = Some(engine);
         *self.wasm_store.lock().unwrap() = Some(store);
@@ -206,7 +214,7 @@ impl SovereignCore {
         Ok(())
     }
 
-    /// Substrate 02: Execute WASM module from bytes
+    /// Substrate 02: Execute WASM module from bytes with WASI support
     pub fn execute_wasm_module(&self, wasm_bytes: &[u8], func_name: &str) -> Result<String, String> {
         let engine_lock = self.wasm_engine.lock().unwrap();
         let engine = engine_lock.as_ref().ok_or("WASM engine not initialized")?;
@@ -216,6 +224,10 @@ impl SovereignCore {
         
         let mut store_lock = self.wasm_store.lock().unwrap();
         let store = store_lock.as_mut().ok_or("WASM store not initialized")?;
+        
+        // Link WASI imports to prevent panics on missing fields
+        wasmtime_wasi::add_to_linker(store, |ctx| ctx)
+            .map_err(|e| format!("Failed to link WASI: {}", e))?;
         
         let instance = Instance::new(&mut *store, &module, &[])
             .map_err(|e| format!("Failed to instantiate WASM module: {}", e))?;

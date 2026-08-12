@@ -25,7 +25,8 @@ dirs = "5.0"
 memmap2 = "0.9"
 
 # Substrate 02: Deterministic Sandboxed WASM Engine
-wasmtime = "19.0"
+wasmtime = "24.0"
+wasmtime-wasi = "24.0"
 
 # Substrate 03: Encrypted P2P Mesh Gossip Protocol
 libp2p = { version = "0.54", features = ["tcp", "noise", "yamux", "gossipsub", "mdns", "dns", "tokio"] }
