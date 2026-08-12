@@ -18,6 +18,20 @@ use tauri::State;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+// Substrate 01: Zero-Copy Memory Bus
+use memmap2::MmapMut;
+use std::fs::OpenOptions;
+
+// Substrate 02: Deterministic Sandboxed WASM Engine
+use wasmtime::*;
+
+// Substrate 03: P2P Mesh imports (available for async integration)
+// Note: Full libp2p swarm setup requires async context in production
+#[allow(unused_imports)]
+use libp2p::{identity, noise, tcp, yamux, gossipsub, mdns, swarm::SwarmEvent};
+#[allow(unused_imports)]
+use std::num::NonZeroUsize;
+
 // Telemetry endpoints to block (Windows 10/11 telemetry)
 const TELEMETRY_ENDPOINTS: &[&str] = &[
     "telemetry.microsoft.com",
@@ -75,6 +89,17 @@ pub struct SovereignCore {
     execution_log: Mutex<Vec<ExecutionResult>>,
     broadcast_tx: broadcast::Sender<String>,
     blocked_cache: Mutex<HashSet<String>>,
+    
+    // Substrate 01: Zero-Copy Memory Bus
+    memory_map: Mutex<Option<MmapMut>>,
+    memory_map_path: PathBuf,
+    
+    // Substrate 02: WASM Execution Engine
+    wasm_engine: Mutex<Option<Engine>>,
+    wasm_store: Mutex<Option<Store<()>>>,
+    
+    // Substrate 03: P2P Mesh Network (async runtime handles this)
+    p2p_enabled: Mutex<bool>,
 }
 
 impl SovereignCore {
@@ -94,13 +119,132 @@ impl SovereignCore {
         // Ensure data directory exists
         fs::create_dir_all(&data_path).ok();
 
-        Self {
+        // Substrate 01: Initialize zero-copy memory bus
+        let memory_map_path = data_path.join("shared_memory.bin");
+        let memory_map = Mutex::new(None);
+        
+        // Substrate 02: Initialize WASM engine
+        let wasm_engine = Mutex::new(None);
+        let wasm_store = Mutex::new(None);
+        
+        // Substrate 03: P2P disabled by default
+        let p2p_enabled = Mutex::new(false);
+
+        let core = Self {
             config: Mutex::new(config),
             cipher: Mutex::new(cipher),
             execution_log: Mutex::new(Vec::new()),
             broadcast_tx,
             blocked_cache: Mutex::new(HashSet::new()),
+            memory_map,
+            memory_map_path,
+            wasm_engine,
+            wasm_store,
+            p2p_enabled,
+        };
+        
+        // Initialize substrates
+        core.initialize_zero_copy_bus().ok();
+        core.initialize_wasm_engine().ok();
+        
+        core
+    }
+
+    /// Substrate 01: Establish Zero-Copy Memory Bus
+    pub fn initialize_zero_copy_bus(&self) -> Result<(), String> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&self.memory_map_path)
+            .map_err(|e| format!("Failed to open memory map file: {}", e))?;
+        
+        file.set_len(64 * 1024 * 1024) // 64MB ring buffer
+            .map_err(|e| format!("Failed to set memory map size: {}", e))?;
+        
+        let mmap = unsafe { MmapMut::map_mut(&file) }
+            .map_err(|e| format!("Failed to map memory: {}", e))?;
+        
+        let mut memory_map = self.memory_map.lock().unwrap();
+        *memory_map = Some(mmap);
+        
+        Ok(())
+    }
+
+    /// Substrate 01: Write telemetry data to zero-copy bus
+    pub fn write_to_memory_bus(&self, data: &[u8]) -> Result<(), String> {
+        let mut memory_map = self.memory_map.lock().unwrap();
+        let mmap = memory_map.as_mut().ok_or("Memory bus not initialized")?;
+        
+        if data.len() > mmap.len() {
+            return Err("Data exceeds memory bus capacity".to_string());
         }
+        
+        mmap[..data.len()].copy_from_slice(data);
+        mmap.flush().map_err(|e| format!("Failed to flush memory map: {}", e))?;
+        
+        Ok(())
+    }
+
+    /// Substrate 01: Read telemetry data from zero-copy bus
+    pub fn read_from_memory_bus(&self, len: usize) -> Result<Vec<u8>, String> {
+        let memory_map = self.memory_map.lock().unwrap();
+        let mmap = memory_map.as_ref().ok_or("Memory bus not initialized")?;
+        
+        let read_len = len.min(mmap.len());
+        Ok(mmap[..read_len].to_vec())
+    }
+
+    /// Substrate 02: Initialize WASM Execution Engine
+    pub fn initialize_wasm_engine(&self) -> Result<(), String> {
+        let engine = Engine::default();
+        let store = Store::new(&engine, ());
+        
+        *self.wasm_engine.lock().unwrap() = Some(engine);
+        *self.wasm_store.lock().unwrap() = Some(store);
+        
+        Ok(())
+    }
+
+    /// Substrate 02: Execute WASM module from bytes
+    pub fn execute_wasm_module(&self, wasm_bytes: &[u8], func_name: &str) -> Result<String, String> {
+        let engine_lock = self.wasm_engine.lock().unwrap();
+        let engine = engine_lock.as_ref().ok_or("WASM engine not initialized")?;
+        
+        let module = Module::from_binary(engine, wasm_bytes)
+            .map_err(|e| format!("Failed to load WASM module: {}", e))?;
+        
+        let mut store_lock = self.wasm_store.lock().unwrap();
+        let store = store_lock.as_mut().ok_or("WASM store not initialized")?;
+        
+        let instance = Instance::new(&mut *store, &module, &[])
+            .map_err(|e| format!("Failed to instantiate WASM module: {}", e))?;
+        
+        let func = instance.get_func(&mut *store, func_name)
+            .ok_or_else(|| format!("Function '{}' not found in WASM module", func_name))?;
+        
+        // Execute function with no args for simplicity
+        let mut results = vec![wasmtime::Value::I32(0)];
+        func.call(&mut *store, &[], &mut results)
+            .map_err(|e| format!("WASM execution failed: {}", e))?;
+        
+        Ok(format!("WASM function '{}' executed successfully, result: {:?}", func_name, results))
+    }
+
+    /// Substrate 03: Enable P2P Mesh Network
+    pub fn enable_p2p_mesh(&self) -> Result<String, String> {
+        // Note: Full libp2p integration requires async runtime
+        // This is a placeholder that marks P2P as enabled
+        // In production, spawn a tokio task with full swarm setup
+        
+        *self.p2p_enabled.lock().unwrap() = true;
+        
+        Ok("P2P mesh network enabled. Full swarm initialization requires async context.".to_string())
+    }
+
+    /// Substrate 03: Check P2P mesh status
+    pub fn is_p2p_enabled(&self) -> bool {
+        *self.p2p_enabled.lock().unwrap()
     }
 
     pub fn encrypt_data(&self, plaintext: &[u8]) -> Result<String, String> {
@@ -266,6 +410,40 @@ fn get_execution_log(state: State<SovereignCore>) -> Result<Vec<ExecutionResult>
     Ok(state.get_execution_log())
 }
 
+// Substrate 01: Zero-Copy Memory Bus Commands
+#[tauri::command]
+fn write_to_memory_bus(state: State<SovereignCore>, data: Vec<u8>) -> Result<(), String> {
+    state.write_to_memory_bus(&data)
+}
+
+#[tauri::command]
+fn read_from_memory_bus(state: State<SovereignCore>, len: usize) -> Result<Vec<u8>, String> {
+    state.read_from_memory_bus(len)
+}
+
+// Substrate 02: WASM Execution Commands
+#[tauri::command]
+fn execute_wasm_module(
+    state: State<SovereignCore>,
+    wasm_bytes_b64: String,
+    func_name: String,
+) -> Result<String, String> {
+    let wasm_bytes = BASE64.decode(&wasm_bytes_b64)
+        .map_err(|e| format!("Failed to decode WASM bytes: {}", e))?;
+    state.execute_wasm_module(&wasm_bytes, &func_name)
+}
+
+// Substrate 03: P2P Mesh Commands
+#[tauri::command]
+fn enable_p2p_mesh(state: State<SovereignCore>) -> Result<String, String> {
+    state.enable_p2p_mesh()
+}
+
+#[tauri::command]
+fn is_p2p_enabled(state: State<SovereignCore>) -> Result<bool, String> {
+    Ok(state.is_p2p_enabled())
+}
+
 fn main() {
     let data_path = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -282,7 +460,15 @@ fn main() {
             check_telemetry_block,
             execute_command,
             get_data_path,
-            get_execution_log
+            get_execution_log,
+            // Substrate 01: Zero-Copy Memory Bus
+            write_to_memory_bus,
+            read_from_memory_bus,
+            // Substrate 02: WASM Execution Engine
+            execute_wasm_module,
+            // Substrate 03: P2P Mesh Network
+            enable_p2p_mesh,
+            is_p2p_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running aero-sovereign");

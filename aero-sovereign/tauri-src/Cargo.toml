@@ -19,6 +19,16 @@ aes-gcm = "0.10"
 base64 = "0.21"
 reqwest = { version = "0.11", features = ["blocking", "json"] }
 regex = "1.10"
+dirs = "5.0"
+
+# Substrate 01: Zero-Copy Memory Bus
+memmap2 = "0.9"
+
+# Substrate 02: Deterministic Sandboxed WASM Engine
+wasmtime = "19.0"
+
+# Substrate 03: Encrypted P2P Mesh Gossip Protocol
+libp2p = { version = "0.54", features = ["tcp", "noise", "yamux", "gossipsub", "mdns", "dns", "tokio"] }
 
 [features]
 default = ["custom-protocol"]
