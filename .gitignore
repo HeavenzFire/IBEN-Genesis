@@ -1,1 +1,1 @@
-Nothing should be ignored based on the provided file changes. The only added file is a markdown documentation file (README_GYROID_PIPELINE.md), which is a source/config file and should not be ignored. There are no build artifacts, dependencies, or temporary files in the changes.
+Nothing should be ignored based on the provided file changes. The only file added is `recognition_cascade.md`, which is a markdown source file and should not be ignored.
