@@ -5,6 +5,8 @@ Tests profiteering violation tracking and criminal referral generation
 """
 
 import pytest
+import os
+import stat
 import json
 from datetime import datetime, timedelta
 from accountability_enforcement_module import (
@@ -319,3 +321,32 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
+def test_secret_key_rejects_symlink_in_any_configured_path_component(tmp_path, monkeypatch):
+    target_dir = tmp_path / "real"
+    target_dir.mkdir()
+    link_dir = tmp_path / "linked"
+    try:
+        link_dir.symlink_to(target_dir, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable on this platform")
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(link_dir / ".sovereign_key"))
+    with pytest.raises(RuntimeError, match="symbolic links"):
+        AccountabilityEnforcementEngine()
+
+
+def test_secret_key_permissions_are_restricted_on_posix(tmp_path, monkeypatch):
+    if os.name == "nt":
+        pytest.skip("POSIX file mode bits are not enforced on Windows")
+    key_path = tmp_path / "secure" / ".sovereign_key"
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(key_path))
+    AccountabilityEnforcementEngine()
+    assert stat.S_IMODE(key_path.stat().st_mode) & 0o077 == 0
+
+
+def test_accountability_ledger_permissions_are_restricted_on_posix(tmp_path, monkeypatch):
+    if os.name == "nt":
+        pytest.skip("POSIX file mode bits are not enforced on Windows")
+    ledger_path = tmp_path / "accountability_ledger.json"
+    monkeypatch.setenv("HEAVENZFIRE_ACCOUNTABILITY_LEDGER_PATH", str(ledger_path))
+    AccountabilityEnforcementEngine().run_full_enforcement_cycle()
+    assert stat.S_IMODE(ledger_path.stat().st_mode) & 0o077 == 0
