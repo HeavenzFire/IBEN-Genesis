@@ -319,7 +319,10 @@ class AccountabilityEnforcementEngine:
             "cryptographic_integrity": "VERIFIED"
         }
         
-        with open("/workspace/accountability_ledger.json", "a") as f:
+        configured_ledger = os.environ.get("HEAVENZFIRE_ACCOUNTABILITY_LEDGER_PATH")
+        ledger_path = Path(configured_ledger).expanduser() if configured_ledger else Path.home() / ".heavenzfire" / "accountability_ledger.json"
+        ledger_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with open(ledger_path, "a", encoding="utf-8") as f:
             json.dump(summary, f)
             f.write("\n")
         
