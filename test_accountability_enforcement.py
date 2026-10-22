@@ -348,5 +348,15 @@ def test_accountability_ledger_permissions_are_restricted_on_posix(tmp_path, mon
         pytest.skip("POSIX file mode bits are not enforced on Windows")
     ledger_path = tmp_path / "accountability_ledger.json"
     monkeypatch.setenv("HEAVENZFIRE_ACCOUNTABILITY_LEDGER_PATH", str(ledger_path))
-    AccountabilityEnforcementEngine().run_full_enforcement_cycle()
+    violation_data = {
+        "entity_name": "Ledger Test",
+        "entity_type": "Test Entity",
+        "scheme_description": "Ledger permissions test",
+        "victims_affected": 1,
+        "financial_damage": 1000,
+        "lives_damaged": 0,
+        "statutory_violations": ["test_only"],
+        "jurisdiction": "TEST"
+    }
+    AccountabilityEnforcementEngine().run_full_enforcement_cycle(violation_data)
     assert stat.S_IMODE(ledger_path.stat().st_mode) & 0o077 == 0
