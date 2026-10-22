@@ -13,6 +13,10 @@ from accountability_enforcement_module import (
     AccountabilityEnforcementEngine
 )
 
+@pytest.fixture(autouse=True)
+def isolated_sovereign_key_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(tmp_path / ".sovereign_key"))
+
 
 class TestProfiteeringViolation:
     """Test suite for ProfiteeringViolation dataclass"""
@@ -294,3 +298,21 @@ class TestStatutoryCitations:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_secret_key_is_created_with_cryptographically_random_32_byte_value(tmp_path, monkeypatch):
+    key_path = tmp_path / "secure" / ".sovereign_key"
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(key_path))
+    engine = AccountabilityEnforcementEngine()
+    assert len(engine.secret_key) == 32
+    assert key_path.read_bytes() == engine.secret_key
+    assert AccountabilityEnforcementEngine().secret_key == engine.secret_key
+
+
+def test_secret_key_rejects_invalid_existing_length(tmp_path, monkeypatch):
+    key_path = tmp_path / "secure" / ".sovereign_key"
+    key_path.parent.mkdir()
+    key_path.write_bytes(b"short")
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(key_path))
+    with pytest.raises(ValueError, match="exactly 32 bytes"):
+        AccountabilityEnforcementEngine()
