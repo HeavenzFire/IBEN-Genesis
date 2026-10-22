@@ -16,6 +16,7 @@ from accountability_enforcement_module import (
 @pytest.fixture(autouse=True)
 def isolated_sovereign_key_path(tmp_path, monkeypatch):
     monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(tmp_path / ".sovereign_key"))
+    monkeypatch.setenv("HEAVENZFIRE_ACCOUNTABILITY_LEDGER_PATH", str(tmp_path / "accountability_ledger.json"))
 
 
 class TestProfiteeringViolation:
