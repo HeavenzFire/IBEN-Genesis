@@ -14,6 +14,9 @@ import hashlib
 import hmac
 import json
 import datetime
+import os
+import secrets
+from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field, asdict
 
@@ -127,14 +130,29 @@ class AccountabilityEnforcementEngine:
         self.secret_key = self._load_or_generate_secret_key()
         
     def _load_or_generate_secret_key(self) -> bytes:
+        configured_path = os.environ.get("HEAVENZFIRE_SOVEREIGN_KEY_PATH")
+        key_path = Path(configured_path).expanduser() if configured_path else Path.home() / ".heavenzfire" / ".sovereign_key"
+        key_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if key_path.parent.is_symlink() or key_path.is_symlink():
+            raise RuntimeError("Sovereign key path must not use a symbolic link")
+
         try:
-            with open("/workspace/.sovereign_key", "rb") as f:
-                return f.read()
+            key = key_path.read_bytes()
         except FileNotFoundError:
-            key = hashlib.sha256(datetime.datetime.now().isoformat().encode()).digest()
-            with open("/workspace/.sovereign_key", "wb") as f:
-                f.write(key)
-            return key
+            key = secrets.token_bytes(32)
+            try:
+                fd = os.open(str(key_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                key = key_path.read_bytes()
+            else:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(key)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+
+        if len(key) != 32:
+            raise ValueError("Sovereign key must contain exactly 32 bytes")
+        return key
     
     def file_violation(self, violation_data: Dict) -> ProfiteeringViolation:
         violation = ProfiteeringViolation(
