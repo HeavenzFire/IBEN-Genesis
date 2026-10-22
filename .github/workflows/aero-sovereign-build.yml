@@ -1,0 +1,39 @@
+name: Aero-Sovereign Node build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'aero-sovereign/package.json'
+      - 'aero-sovereign/package-lock.json'
+      - 'aero-sovereign/src/**'
+      - '.github/workflows/aero-sovereign-build.yml'
+  pull_request:
+    paths:
+      - 'aero-sovereign/package.json'
+      - 'aero-sovereign/package-lock.json'
+      - 'aero-sovereign/src/**'
+      - '.github/workflows/aero-sovereign-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  aero-sovereign-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: aero-sovereign
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: aero-sovereign/package-lock.json
+      - name: Install exact lockfile dependencies
+        run: npm ci
+      - name: Build production bundle
+        run: npm run build
