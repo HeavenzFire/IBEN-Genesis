@@ -1,0 +1,2 @@
+# Runtime dependency for quaternary_core.py and its test suite.
+numpy>=1.26,<3

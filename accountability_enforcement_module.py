@@ -14,6 +14,10 @@ import hashlib
 import hmac
 import json
 import datetime
+import os
+import secrets
+import stat
+from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field, asdict
 
@@ -91,6 +95,18 @@ class CriminalReferral:
             "rico_charges_applicable": violation.monetary_extraction_usd > 5_000_000 or violation.lives_lost > 0
         }
 
+def _reject_symlink_components(path: Path) -> None:
+    absolute = Path(os.path.abspath(path))
+    current = Path(absolute.anchor)
+    for component in absolute.parts[1:]:
+        current = current / component
+        try:
+            if current.is_symlink():
+                raise RuntimeError("Sensitive file path must not contain symbolic links")
+        except OSError as exc:
+            raise RuntimeError("Unable to validate sensitive file path") from exc
+
+
 class AccountabilityEnforcementEngine:
     STATUTORY_CITATIONS = {
         "false_claims": "31 U.S.C. § 3729-3733 (False Claims Act - Treble Damages)",
@@ -127,14 +143,72 @@ class AccountabilityEnforcementEngine:
         self.secret_key = self._load_or_generate_secret_key()
         
     def _load_or_generate_secret_key(self) -> bytes:
-        try:
-            with open("/workspace/.sovereign_key", "rb") as f:
-                return f.read()
-        except FileNotFoundError:
-            key = hashlib.sha256(datetime.datetime.now().isoformat().encode()).digest()
-            with open("/workspace/.sovereign_key", "wb") as f:
-                f.write(key)
+        configured_path = os.environ.get("HEAVENZFIRE_SOVEREIGN_KEY_PATH")
+        if configured_path:
+            key_path = Path(os.path.abspath(Path(configured_path).expanduser()))
+        else:
+            # Resolve the trusted home directory first so platform-level aliases
+            # (for example, /var -> /private/var) are not treated as user input.
+            key_path = Path.home().resolve() / ".heavenzfire" / ".sovereign_key"
+        key_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _reject_symlink_components(key_path)
+
+        def read_existing() -> bytes:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(str(key_path), flags)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise RuntimeError("Sovereign key must be a regular file")
+                if os.name != "nt":
+                    os.fchmod(fd, 0o600)
+                chunks = bytearray()
+                while len(chunks) < 33:
+                    part = os.read(fd, 33 - len(chunks))
+                    if not part:
+                        break
+                    chunks.extend(part)
+                key = bytes(chunks)
+            finally:
+                os.close(fd)
+            if len(key) != 32:
+                raise ValueError("Sovereign key must contain exactly 32 bytes")
             return key
+
+        try:
+            return read_existing()
+        except FileNotFoundError:
+            key = secrets.token_bytes(32)
+            temp_path = key_path.parent / (key_path.name + ".tmp-" + secrets.token_hex(8))
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            fd = os.open(str(temp_path), flags, 0o600)
+            try:
+                with os.fdopen(fd, "wb", closefd=False) as handle:
+                    handle.write(key)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            finally:
+                os.close(fd)
+
+            try:
+                _reject_symlink_components(key_path)
+                try:
+                    # Hard-link publication is atomic and fails rather than
+                    # replacing a key another process has already published.
+                    os.link(str(temp_path), str(key_path))
+                except FileExistsError:
+                    return read_existing()
+                if os.name != "nt":
+                    dir_fd = os.open(str(key_path.parent), os.O_RDONLY)
+                    try:
+                        os.fsync(dir_fd)
+                    finally:
+                        os.close(dir_fd)
+                return key
+            finally:
+                try:
+                    temp_path.unlink()
+                except FileNotFoundError:
+                    pass
     
     def file_violation(self, violation_data: Dict) -> ProfiteeringViolation:
         violation = ProfiteeringViolation(
@@ -301,9 +375,25 @@ class AccountabilityEnforcementEngine:
             "cryptographic_integrity": "VERIFIED"
         }
         
-        with open("/workspace/accountability_ledger.json", "a") as f:
-            json.dump(summary, f)
-            f.write("\n")
+        configured_ledger = os.environ.get("HEAVENZFIRE_ACCOUNTABILITY_LEDGER_PATH")
+        ledger_path = (Path(os.path.abspath(Path(configured_ledger).expanduser()))
+                       if configured_ledger else Path.home().resolve() / ".heavenzfire" / "accountability_ledger.json")
+        ledger_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _reject_symlink_components(ledger_path)
+        flags = os.O_CREAT | os.O_APPEND | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(str(ledger_path), flags, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise RuntimeError("Accountability ledger must be a regular file")
+            if os.name != "nt":
+                os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as handle:
+                json.dump(summary, handle)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+        finally:
+            os.close(fd)
         
         total_exposure = sum(summary['total_penalties_recommended'].values())
         print("\n" + "✨"*40)

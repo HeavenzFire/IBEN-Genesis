@@ -5,6 +5,8 @@ Tests profiteering violation tracking and criminal referral generation
 """
 
 import pytest
+import os
+import stat
 import json
 from datetime import datetime, timedelta
 from accountability_enforcement_module import (
@@ -12,6 +14,11 @@ from accountability_enforcement_module import (
     CriminalReferral,
     AccountabilityEnforcementEngine
 )
+
+@pytest.fixture(autouse=True)
+def isolated_sovereign_key_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(tmp_path / ".sovereign_key"))
+    monkeypatch.setenv("HEAVENZFIRE_ACCOUNTABILITY_LEDGER_PATH", str(tmp_path / "accountability_ledger.json"))
 
 
 class TestProfiteeringViolation:
@@ -292,5 +299,64 @@ class TestStatutoryCitations:
         assert "HHS_OIG" in engine.RECIPIENT_AGENCIES
 
 
+def test_secret_key_is_created_with_cryptographically_random_32_byte_value(tmp_path, monkeypatch):
+    key_path = tmp_path / "secure" / ".sovereign_key"
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(key_path))
+    engine = AccountabilityEnforcementEngine()
+    assert len(engine.secret_key) == 32
+    assert key_path.read_bytes() == engine.secret_key
+    assert AccountabilityEnforcementEngine().secret_key == engine.secret_key
+
+
+def test_secret_key_rejects_invalid_existing_length(tmp_path, monkeypatch):
+    key_path = tmp_path / "secure" / ".sovereign_key"
+    key_path.parent.mkdir()
+    key_path.write_bytes(b"short")
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(key_path))
+    with pytest.raises(ValueError, match="exactly 32 bytes"):
+        AccountabilityEnforcementEngine()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_secret_key_rejects_symlink_in_any_configured_path_component(tmp_path, monkeypatch):
+    target_dir = tmp_path / "real"
+    target_dir.mkdir()
+    link_dir = tmp_path / "linked"
+    try:
+        link_dir.symlink_to(target_dir, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("directory symlinks are unavailable on this platform")
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(link_dir / ".sovereign_key"))
+    with pytest.raises(RuntimeError, match="symbolic links"):
+        AccountabilityEnforcementEngine()
+
+
+def test_secret_key_permissions_are_restricted_on_posix(tmp_path, monkeypatch):
+    if os.name == "nt":
+        pytest.skip("POSIX file mode bits are not enforced on Windows")
+    key_path = tmp_path / "secure" / ".sovereign_key"
+    monkeypatch.setenv("HEAVENZFIRE_SOVEREIGN_KEY_PATH", str(key_path))
+    AccountabilityEnforcementEngine()
+    assert stat.S_IMODE(key_path.stat().st_mode) & 0o077 == 0
+
+
+def test_accountability_ledger_permissions_are_restricted_on_posix(tmp_path, monkeypatch):
+    if os.name == "nt":
+        pytest.skip("POSIX file mode bits are not enforced on Windows")
+    ledger_path = tmp_path / "accountability_ledger.json"
+    monkeypatch.setenv("HEAVENZFIRE_ACCOUNTABILITY_LEDGER_PATH", str(ledger_path))
+    violation_data = {
+        "entity_name": "Ledger Test",
+        "entity_type": "Test Entity",
+        "scheme_description": "Ledger permissions test",
+        "victims_affected": 1,
+        "financial_damage": 1000,
+        "lives_damaged": 0,
+        "statutory_violations": ["test_only"],
+        "jurisdiction": "TEST"
+    }
+    AccountabilityEnforcementEngine().run_full_enforcement_cycle(violation_data)
+    assert stat.S_IMODE(ledger_path.stat().st_mode) & 0o077 == 0
